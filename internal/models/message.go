@@ -11,6 +11,7 @@ type Message struct {
 	ID        string `gorm:"type:uuid;primary_key;"`
 	RoomID    string `gorm:"type:uuid;not null;index"`
 	SenderID  string `gorm:"type:uuid;not null;index"`
+	Content   string `gorm:"type:text;not null"`
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
