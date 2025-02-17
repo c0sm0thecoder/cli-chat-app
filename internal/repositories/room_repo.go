@@ -8,6 +8,7 @@ import (
 type RoomRepository interface {
 	Create(room *models.Room) error
 	FindByName(roomName string) (*models.Room, error)
+	FindByCode(roomCode string) (*models.Room, error)
 }
 
 type roomRepo struct {
@@ -25,5 +26,11 @@ func (r *roomRepo) Create(room *models.Room) error {
 func (r *roomRepo) FindByName(roomName string) (*models.Room, error) {
 	var room models.Room
 	err := r.db.Where("name = ?", roomName).First(&room).Error
+	return &room, err
+}
+
+func (r *roomRepo) FindByCode(roomCode string) (*models.Room, error) {
+	var room models.Room
+	err := r.db.Where("code = ?", roomCode).First(&room).Error
 	return &room, err
 }

@@ -10,7 +10,7 @@ import (
 type Room struct {
 	ID        string `gorm:"type:uuid;primary_key;"`
 	Name      string `gorm:"size:100;not null"`
-	Code      string `gorm:"size:10;uniqueIndex;not null"`
+	Code      string `gorm:"size:12;uniqueIndex;not null"`
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }

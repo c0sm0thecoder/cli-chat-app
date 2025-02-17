@@ -12,6 +12,7 @@ type ChatService interface {
 	CreateRoom(roomName string) error
 	SendMessage(roomID, senderID, messageContent string) error
 	GetMessages(roomID string) ([]models.Message, error)
+	GetRoomByCode(roomCode string) (*models.Room, error)
 }
 
 type chatService struct {
@@ -52,4 +53,8 @@ func (s *chatService) SendMessage(roomID, senderID, messageContent string) error
 
 func (s *chatService) GetMessages(roomID string) ([]models.Message, error) {
 	return s.messageRepo.FindByRoom(roomID)
+}
+
+func (s *chatService) GetRoomByCode(roomCode string) (*models.Room, error) {
+	return s.roomRepo.FindByCode(roomCode)
 }

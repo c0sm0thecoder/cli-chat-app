@@ -1,3 +1,9 @@
+# github.com/cespare/xxhash/v2 v2.2.0
+## explicit; go 1.11
+github.com/cespare/xxhash/v2
+# github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f
+## explicit
+github.com/dgryski/go-rendezvous
 # github.com/go-chi/chi/v5 v5.2.1
 ## explicit; go 1.20
 github.com/go-chi/chi/v5
@@ -20,6 +26,16 @@ github.com/joho/godotenv
 # github.com/matoous/go-nanoid/v2 v2.1.0
 ## explicit; go 1.20
 github.com/matoous/go-nanoid/v2
+# github.com/redis/go-redis/v9 v9.7.0
+## explicit; go 1.18
+github.com/redis/go-redis/v9
+github.com/redis/go-redis/v9/internal
+github.com/redis/go-redis/v9/internal/hashtag
+github.com/redis/go-redis/v9/internal/hscan
+github.com/redis/go-redis/v9/internal/pool
+github.com/redis/go-redis/v9/internal/proto
+github.com/redis/go-redis/v9/internal/rand
+github.com/redis/go-redis/v9/internal/util
 # golang.org/x/crypto v0.33.0
 ## explicit; go 1.20
 golang.org/x/crypto/bcrypt
