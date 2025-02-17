@@ -7,7 +7,7 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-var ctx = context.Background()
+var ctxRedis = context.Background()
 
 func CreateRedisChannel(redisUrl string) *redis.Client {
 	opt, err := redis.ParseURL(redisUrl)
@@ -19,7 +19,7 @@ func CreateRedisChannel(redisUrl string) *redis.Client {
 }
 
 func PublishMessage(client *redis.Client, channel, message string) error {
-	err := client.Publish(ctx, channel, message)
+	err := client.Publish(ctxRedis, channel, message)
 	if err != nil {
 		log.Fatalf("Error publishing message to Redis: %v", err)
 	}
@@ -27,8 +27,8 @@ func PublishMessage(client *redis.Client, channel, message string) error {
 }
 
 func SubscribeChannel(client *redis.Client, channel string, messageHandler func(message string)) {
-	pubsub := client.Subscribe(ctx, channel)
-	_, err := pubsub.Receive(ctx)
+	pubsub := client.Subscribe(ctxRedis, channel)
+	_, err := pubsub.Receive(ctxRedis)
 	if err != nil {
 		log.Printf("Failed to subscribe to channel %s: %v", channel, err)
 		return
