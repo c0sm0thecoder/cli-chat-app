@@ -18,6 +18,13 @@ type v1Router struct {
 func NewV1Router(authService services.AuthService, chatService services.ChatService) http.Handler {
 	router := chi.NewRouter()
 
+	router.Use(middlewares.LoggingMiddleware)
+
+	router.Get("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	})
+
 	router.Post("/signup", func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			UserName string `json:"username"`
@@ -99,5 +106,6 @@ func NewV1Router(authService services.AuthService, chatService services.ChatServ
 		})
 	})
 
+	router.Mount("/api/v1", router)
 	return router
 }
