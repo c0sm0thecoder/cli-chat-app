@@ -8,16 +8,19 @@ import (
 )
 
 type Message struct {
-	ID        string `gorm:"type:uuid;primary_key;"`
-	RoomID    string `gorm:"type:uuid;not null;index"`
-	SenderID  string `gorm:"type:uuid;not null;index"`
-	Content   string `gorm:"type:text;not null"`
+	ID        string    `gorm:"type:uuid;primaryKey"`
+	RoomID    string    `gorm:"type:uuid;not null;index"`
+	SenderID  string    `gorm:"type:varchar(255);not null;index"`
+	Content   string    `gorm:"type:text;not null"`
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
 
-// Set UUID rather than numeric ID
+// BeforeCreate will set a UUID rather than numeric ID
 func (m *Message) BeforeCreate(tx *gorm.DB) error {
-	m.ID = uuid.New().String()
+	if m.ID == "" {
+		// Generate a new UUID and convert to string
+		m.ID = uuid.New().String()
+	}
 	return nil
 }

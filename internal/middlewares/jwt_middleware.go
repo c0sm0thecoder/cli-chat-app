@@ -2,75 +2,96 @@ package middlewares
 
 import (
 	"context"
-	"errors"
+	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"time"
 
-	"github.com/go-chi/chi/v5/middleware"
 	"github.com/golang-jwt/jwt/v5"
 )
 
-type contextKey string
-
-const UserContextKey = contextKey("user")
-
-// JWTMiddleware validates the JWT token and attaches its claims to the context.
-func JWTMiddleware(jwtSecret string) func(next http.Handler) http.Handler {
+// JWTMiddleware validates JWT tokens for protected routes
+func JWTMiddleware(secretKey string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
-		fn := func(w http.ResponseWriter, r *http.Request) {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Get token from Authorization header
 			authHeader := r.Header.Get("Authorization")
 			if authHeader == "" {
-				http.Error(w, "Missing Authorization header", http.StatusUnauthorized)
+				log.Println("Missing Authorization header")
+				http.Error(w, "Unauthorized", http.StatusUnauthorized)
 				return
 			}
 
-			parts := strings.Split(authHeader, " ")
-			if len(parts) != 2 || parts[0] != "Bearer" {
-				http.Error(w, "Invalid Authorization header format", http.StatusUnauthorized)
+			// Check if the header has the Bearer prefix
+			bearerPrefix := "Bearer "
+			if !strings.HasPrefix(authHeader, bearerPrefix) {
+				log.Println("Authorization header missing Bearer prefix")
+				http.Error(w, "Invalid Authorization format", http.StatusUnauthorized)
 				return
 			}
 
-			tokenString := parts[1]
+			// Extract the token
+			tokenString := strings.TrimPrefix(authHeader, bearerPrefix)
+			
+			// Debug logging
+			log.Printf("Processing token: %s", tokenString[:10] + "...")
+
+			// Parse and validate the token
 			token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+				// Validate the signing method
 				if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-					return nil, errors.New("unexpected signing method")
+					return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 				}
-				return []byte(jwtSecret), nil
+				return []byte(secretKey), nil
 			})
 
 			if err != nil {
-				http.Error(w, "Invalid token: "+err.Error(), http.StatusUnauthorized)
+				log.Printf("JWT Parse error: %v", err)
+				http.Error(w, "Unauthorized", http.StatusUnauthorized)
 				return
 			}
 
+			// Check if the token is valid
 			if !token.Valid {
-				http.Error(w, "Invalid token", http.StatusUnauthorized)
+				log.Println("Invalid token")
+				http.Error(w, "Unauthorized", http.StatusUnauthorized)
 				return
 			}
 
-			// Verify token claims
+			// Extract claims
 			claims, ok := token.Claims.(jwt.MapClaims)
 			if !ok {
-				http.Error(w, "Invalid token claims", http.StatusUnauthorized)
+				log.Println("Failed to extract claims")
+				http.Error(w, "Unauthorized", http.StatusUnauthorized)
 				return
 			}
 
-			// Check expiration
-			exp, ok := claims["exp"].(float64)
+			// Check if token is expired
+			if exp, ok := claims["exp"].(float64); ok {
+				if time.Now().Unix() > int64(exp) {
+					log.Println("Token expired")
+					http.Error(w, "Token expired", http.StatusUnauthorized)
+					return
+				}
+			}
+
+			// Extract user ID
+			userID, ok := claims["sub"].(string)
 			if !ok {
-				http.Error(w, "Invalid token expiration", http.StatusUnauthorized)
+				log.Println("Missing user ID in token")
+				http.Error(w, "Unauthorized", http.StatusUnauthorized)
 				return
 			}
 
-			if time.Unix(int64(exp), 0).Before(time.Now()) {
-				http.Error(w, "Token has expired", http.StatusUnauthorized)
-				return
-			}
+			// Log successful authentication
+			log.Printf("Authenticated user: %s", userID)
 
-			ctx := context.WithValue(r.Context(), UserContextKey, claims)
+			// Add user ID to request context
+			ctx := context.WithValue(r.Context(), "userID", userID)
+			
+			// Call the next handler with the updated context
 			next.ServeHTTP(w, r.WithContext(ctx))
-		}
-		return middleware.RequestID(http.HandlerFunc(fn))
+		})
 	}
 }

@@ -1,7 +1,6 @@
 package repositories
 
 import (
-	"errors"
 	"fmt"
 
 	"github.com/c0sm0thecoder/cli-chat-app/internal/models"

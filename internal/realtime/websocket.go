@@ -2,13 +2,15 @@ package realtime
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
-	"time"
 
+	"github.com/c0sm0thecoder/cli-chat-app/internal/models"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/websocket"
 	"github.com/redis/go-redis/v9"
 )
@@ -23,6 +25,20 @@ var upgrader = websocket.Upgrader{
 	WriteBufferSize: 1024,
 }
 
+var (
+	// Map to store clients by room
+	roomClients = make(map[string][]*Client)
+	clientMutex = &sync.Mutex{}
+)
+
+// Client represents a WebSocket client connection
+type Client struct {
+	conn     *websocket.Conn
+	roomID   string
+	userID   string
+	username string
+}
+
 func GetRedisClient() (*redis.Client, error) {
 	redisURL := os.Getenv("REDIS_URL")
 	if redisURL == "" {
@@ -31,107 +47,159 @@ func GetRedisClient() (*redis.Client, error) {
 	return CreateRedisChannel(redisURL), nil
 }
 
+// HandleWebSocket handles WebSocket connections
 func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
-	roomCode := r.URL.Query().Get("room")
-	if roomCode == "" {
-		http.Error(w, "Room code is required", http.StatusBadRequest)
+	// Extract token from URL query parameters or Authorization header
+	token := r.URL.Query().Get("token")
+	if token == "" {
+		authHeader := r.Header.Get("Authorization")
+		if authHeader != "" && strings.HasPrefix(authHeader, "Bearer ") {
+			token = strings.TrimPrefix(authHeader, "Bearer ")
+		}
+	}
+
+	// Validate token and extract user ID
+	userID, username, err := validateToken(token)
+	if err != nil {
+		// Use HTTP error instead of logging
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 
-	// Upgrade HTTP request to WebSocket connection
+	// Extract room ID from query parameters
+	roomID := r.URL.Query().Get("room_id")
+	if roomID == "" {
+		// Use HTTP error instead of logging
+		http.Error(w, "Missing room_id parameter", http.StatusBadRequest)
+		return
+	}
+
+	// Upgrade HTTP connection to WebSocket
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Printf("WebSocket upgrade error: %v", err)
-		http.Error(w, "Failed to upgrade connection to WebSocket", http.StatusInternalServerError)
+		// Server-side error, won't affect client UI
 		return
 	}
-	defer conn.Close()
 
-	// Set ping handler to keep connection alive
-	conn.SetPingHandler(func(appData string) error {
-		err := conn.WriteControl(websocket.PongMessage, []byte(appData), time.Now().Add(10*time.Second))
-		if err == websocket.ErrCloseSent {
-			return nil
+	// Create new client
+	client := &Client{
+		conn:     conn,
+		roomID:   roomID,
+		userID:   userID,
+		username: username,
+	}
+
+	// Register client
+	clientMutex.Lock()
+	roomClients[roomID] = append(roomClients[roomID], client)
+	clientMutex.Unlock()
+
+	// Handle client messages
+	go handleClient(client)
+}
+
+// validateToken validates the JWT token and extracts the user ID
+func validateToken(tokenString string) (string, string, error) {
+	// Parse the token
+	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		// Verify signing method
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, jwt.ErrSignatureInvalid
 		}
-		return err
+		return []byte(getJWTSecret()), nil
 	})
 
-	// Create and subscribe to a Redis channel for this room
-	redisClient, err := GetRedisClient()
 	if err != nil {
-		log.Printf("Redis client error: %v", err)
-		conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseInternalServerErr, "Server error"))
+		return "", "", err
+	}
+
+	// Extract claims
+	if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
+		userID, ok := claims["sub"].(string)
+		if !ok {
+			return "", "", jwt.ErrTokenInvalidClaims
+		}
+		return userID, userID, nil // Using userID as username for now
+	}
+
+	return "", "", jwt.ErrTokenInvalidClaims
+}
+
+// getJWTSecret retrieves the JWT secret key
+func getJWTSecret() string {
+	// In a real app, this would be fetched from environment or config
+	return os.Getenv("JWT_SECRET")
+}
+
+// handleClient manages the WebSocket connection for a client
+func handleClient(client *Client) {
+	defer func() {
+		// Remove client when connection closes
+		client.conn.Close()
+		removeClient(client)
+	}()
+
+	for {
+		// Read message from client
+		_, _, err := client.conn.ReadMessage()
+		if err != nil {
+			// Clean exit without logging to console
+			break
+		}
+
+		// For now we're just keeping the connection alive
+		// Message processing would be implemented here if needed
+	}
+}
+
+// BroadcastMessage sends a message to all clients in a room
+func BroadcastMessage(roomID string, message *models.Message, username string) {
+	clientMutex.Lock()
+	clients := roomClients[roomID]
+	clientMutex.Unlock()
+
+	// Create message payload
+	payload := map[string]interface{}{
+		"type":       "new_message",
+		"id":         message.ID,
+		"room_id":    message.RoomID,
+		"sender_id":  message.SenderID,
+		"username":   username,
+		"content":    message.Content,
+		"created_at": message.CreatedAt,
+	}
+
+	// Convert to JSON
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
 		return
 	}
 
-	channelName := "room:" + roomCode
-	pubsub := redisClient.Subscribe(ctxWS, channelName)
-	defer pubsub.Close()
-
-	var wg sync.WaitGroup
-	done := make(chan struct{})
-
-	// Read the messages from Redis and write to Websocket
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		ch := pubsub.Channel()
-		for {
-			select {
-			case msg, ok := <-ch:
-				if !ok {
-					return
-				}
-				if err := conn.WriteMessage(websocket.TextMessage, []byte(msg.Payload)); err != nil {
-					log.Printf("Error writing message to WebSocket: %v", err)
-					return
-				}
-			case <-done:
-				return
-			}
-		}
-	}()
-
-	// Send ping messages periodically to keep the connection alive
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		ticker := time.NewTicker(30 * time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
-					log.Printf("Ping error: %v", err)
-					return
-				}
-			case <-done:
-				return
-			}
-		}
-	}()
-
-	// Process incoming WebSocket messages
-	for {
-		messageType, message, err := conn.ReadMessage()
+	// Send to all clients in the room
+	for _, client := range clients {
+		err := client.conn.WriteMessage(websocket.TextMessage, jsonData)
 		if err != nil {
-			log.Printf("WebSocket read error: %v", err)
-			close(done)
-			break
+			client.conn.Close()
+			removeClient(client)
 		}
-		
-		if messageType != websocket.TextMessage {
-			continue
-		}
+	}
+}
 
-		// Publish message to Redis
-		err = redisClient.Publish(ctxWS, channelName, message).Err()
-		if err != nil {
-			log.Printf("Redis publish error: %v", err)
-			close(done)
+// removeClient removes a client from the room
+func removeClient(client *Client) {
+	clientMutex.Lock()
+	defer clientMutex.Unlock()
+
+	clients := roomClients[client.roomID]
+	for i, c := range clients {
+		if c == client {
+			roomClients[client.roomID] = append(clients[:i], clients[i+1:]...)
 			break
 		}
 	}
 
-	wg.Wait()
+	// Clean up empty rooms
+	if len(roomClients[client.roomID]) == 0 {
+		delete(roomClients, client.roomID)
+	}
 }

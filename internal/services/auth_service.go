@@ -2,20 +2,18 @@ package services
 
 import (
 	"errors"
-	"fmt"
+	"log"
 	"time"
 
 	"github.com/c0sm0thecoder/cli-chat-app/internal/models"
 	"github.com/c0sm0thecoder/cli-chat-app/internal/repositories"
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
-	"gorm.io/gorm"
 )
 
 type AuthService interface {
 	SignUp(username, password string) error
 	Login(username, password string) (string, error)
-	ParseToken(tokenString string) (*jwt.Token, error)
 }
 
 type authService struct {
@@ -24,86 +22,71 @@ type authService struct {
 }
 
 var (
-	ErrUserNotFound      = errors.New("user not found")
-	ErrInvalidCredentials = errors.New("invalid username or password")
-	ErrUserAlreadyExists = errors.New("username already exists")
-	ErrTokenCreation     = errors.New("failed to create authentication token")
+	ErrUserAlreadyExists  = errors.New("user already exists")
+	ErrUserNotFound       = errors.New("user not found")
+	ErrInvalidCredentials = errors.New("invalid credentials")
 )
 
 func NewAuthService(userRepo repositories.UserRepository, jwtSecret string) AuthService {
-	return &authService{userRepo: userRepo, jwtSecret: jwtSecret}
+	return &authService{
+		userRepo:  userRepo,
+		jwtSecret: jwtSecret,
+	}
 }
 
 func (s *authService) SignUp(username, password string) error {
 	// Check if user already exists
-	_, err := s.userRepo.FindByUsername(username)
-	if err == nil {
+	existingUser, err := s.userRepo.FindByUsername(username)
+	if err == nil && existingUser != nil {
 		return ErrUserAlreadyExists
-	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
-		return fmt.Errorf("database error: %w", err)
 	}
 
-	// Hash the entered password
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	// Hash password
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
-		return fmt.Errorf("password hashing error: %w", err)
+		return err
 	}
 
+	// Create user
 	user := &models.User{
-		UserName:     username,
-		PasswordHash: string(hash),
+		UserName: username,
+		PasswordHash: string(hashedPassword), // Assuming the field is PasswordHash
 	}
 
-	if err := s.userRepo.Create(user); err != nil {
-		return fmt.Errorf("failed to create user: %w", err)
-	}
-
-	return nil
+	return s.userRepo.Create(user)
 }
 
 func (s *authService) Login(username, password string) (string, error) {
-	// Look up if the user exists
+	log.Printf("Attempting login for user: %s", username)
+	
+	// Find user by username
 	user, err := s.userRepo.FindByUsername(username)
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return "", ErrUserNotFound
-		}
-		return "", fmt.Errorf("database error: %w", err)
+		log.Printf("Login error - user not found: %s", username)
+		return "", ErrUserNotFound
 	}
 
-	// Check if the password is correct
-	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {
+	// Compare passwords
+	err = bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password))
+	if err != nil {
+		log.Printf("Login error - invalid password for user: %s", username)
 		return "", ErrInvalidCredentials
 	}
 
-	// Create a JWT token valid for 24 hours
+	// Generate JWT token
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"user_id":  user.ID,
-		"username": user.UserName,
-		"exp":      time.Now().Add(24 * time.Hour).Unix(),
-		"iat":      time.Now().Unix(), // Issued at time
+		"sub": user.UserName, // Use username as subject
+		"exp": time.Now().Add(24 * time.Hour).Unix(), // Token expires in 24 hours
+		"iat": time.Now().Unix(),
 	})
 
-	// Return the generated JWT token string
+	// Sign token with secret key
 	tokenString, err := token.SignedString([]byte(s.jwtSecret))
 	if err != nil {
-		return "", ErrTokenCreation
+		log.Printf("Error signing JWT token: %v", err)
+		return "", err
 	}
 
+	log.Printf("Login successful for user: %s, token created", username)
 	return tokenString, nil
-}
-
-func (s *authService) ParseToken(tokenString string) (*jwt.Token, error) {
-	token, err := jwt.Parse(tokenString, func(t *jwt.Token) (interface{}, error) {
-		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, errors.New("unexpected signing method")
-		}
-		return []byte(s.jwtSecret), nil
-	})
-	
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse token: %w", err)
-	}
-	
-	return token, nil
 }

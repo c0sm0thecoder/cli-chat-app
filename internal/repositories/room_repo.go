@@ -3,6 +3,7 @@ package repositories
 import (
 	"errors"
 	"fmt"
+	"log"
 
 	"github.com/c0sm0thecoder/cli-chat-app/internal/models"
 	"gorm.io/gorm"
@@ -23,9 +24,12 @@ func NewRoomRepository(db *gorm.DB) RoomRepository {
 }
 
 func (r *roomRepo) Create(room *models.Room) error {
+	log.Printf("Creating room: %+v", room)
 	if err := r.db.Create(room).Error; err != nil {
+		log.Printf("Error creating room: %v", err)
 		return fmt.Errorf("failed to create room: %w", err)
 	}
+	log.Printf("Room created successfully with ID: %s", room.ID)
 	return nil
 }
 

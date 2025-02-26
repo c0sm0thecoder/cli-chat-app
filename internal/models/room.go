@@ -8,15 +8,18 @@ import (
 )
 
 type Room struct {
-	ID        string `gorm:"type:uuid;primary_key;"`
-	Name      string `gorm:"size:100;not null"`
-	Code      string `gorm:"size:12;uniqueIndex;not null"`
+	ID        string    `gorm:"type:uuid;primaryKey"`
+	Name      string    `gorm:"size:100;not null"`
+	Code      string    `gorm:"size:12;uniqueIndex;not null"`
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
 
-// Set UUID rather than numeric ID
+// BeforeCreate will set a UUID rather than numeric ID
 func (r *Room) BeforeCreate(tx *gorm.DB) error {
-	r.ID = uuid.New().String()
+	if r.ID == "" {
+		// Generate a new UUID and convert to string
+		r.ID = uuid.New().String()
+	}
 	return nil
 }
