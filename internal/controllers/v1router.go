@@ -31,16 +31,27 @@ func NewV1Router(authService services.AuthService, chatService services.ChatServ
 			Password string `json:"password"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "Invalid request", http.StatusBadRequest)
+			http.Error(w, "Invalid request body", http.StatusBadRequest)
+			return
+		}
+
+		if req.UserName == "" || req.Password == "" {
+			http.Error(w, "Username and password are required", http.StatusBadRequest)
 			return
 		}
 
 		if err := authService.SignUp(req.UserName, req.Password); err != nil {
-			http.Error(w, "Request failed:"+err.Error(), http.StatusBadRequest)
+			switch err {
+			case services.ErrUserAlreadyExists:
+				http.Error(w, "Username already exists", http.StatusConflict)
+			default:
+				http.Error(w, "Failed to create account: "+err.Error(), http.StatusInternalServerError)
+			}
 			return
 		}
 
 		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(map[string]string{"message": "User created successfully"})
 	})
 
 	router.Post("/login", func(w http.ResponseWriter, r *http.Request) {
@@ -49,15 +60,27 @@ func NewV1Router(authService services.AuthService, chatService services.ChatServ
 			Password string `json:"password"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "Invalid request", http.StatusBadRequest)
+			http.Error(w, "Invalid request body", http.StatusBadRequest)
+			return
+		}
+
+		if req.UserName == "" || req.Password == "" {
+			http.Error(w, "Username and password are required", http.StatusBadRequest)
 			return
 		}
 
 		token, err := authService.Login(req.UserName, req.Password)
 		if err != nil {
-			http.Error(w, "Invalid Credentials:"+err.Error(), http.StatusUnauthorized)
+			switch err {
+			case services.ErrUserNotFound, services.ErrInvalidCredentials:
+				http.Error(w, "Invalid username or password", http.StatusUnauthorized)
+			default:
+				http.Error(w, "Login failed: "+err.Error(), http.StatusInternalServerError)
+			}
+			return
 		}
 
+		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]string{"token": token})
 	})
 
@@ -69,22 +92,34 @@ func NewV1Router(authService services.AuthService, chatService services.ChatServ
 				Name string `json:"name"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-				http.Error(w, "Invalid request", http.StatusBadRequest)
+				http.Error(w, "Invalid request body", http.StatusBadRequest)
 				return
 			}
+			
+			if req.Name == "" {
+				http.Error(w, "Room name is required", http.StatusBadRequest)
+				return
+			}
+			
 			if err := chatService.CreateRoom(req.Name); err != nil {
-				http.Error(w, "Error creating room:"+err.Error(), http.StatusInternalServerError)
+				http.Error(w, "Error creating room: "+err.Error(), http.StatusInternalServerError)
 				return
 			}
+			
 			w.WriteHeader(http.StatusCreated)
+			json.NewEncoder(w).Encode(map[string]string{"message": "Room created successfully"})
 		})
 
 		r.Post("/rooms/{code}/messages", func(w http.ResponseWriter, r *http.Request) {
 			roomCode := chi.URLParam(r, "code")
+			if roomCode == "" {
+				http.Error(w, "Room code is required", http.StatusBadRequest)
+				return
+			}
 
 			room, err := chatService.GetRoomByCode(roomCode)
 			if err != nil {
-				http.Error(w, "Room could not be found", http.StatusBadRequest)
+				http.Error(w, "Room not found", http.StatusNotFound)
 				return
 			}
 
@@ -93,19 +128,48 @@ func NewV1Router(authService services.AuthService, chatService services.ChatServ
 				Content  string `json:"content"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-				http.Error(w, "Invalid request", http.StatusBadRequest)
+				http.Error(w, "Invalid request body", http.StatusBadRequest)
+				return
+			}
+			
+			if req.Content == "" {
+				http.Error(w, "Message content is required", http.StatusBadRequest)
 				return
 			}
 
 			if err := chatService.SendMessage(room.ID, req.SenderID, req.Content); err != nil {
-				http.Error(w, "Error sending message", http.StatusInternalServerError)
+				http.Error(w, "Error sending message: "+err.Error(), http.StatusInternalServerError)
 				return
 			}
 
 			w.WriteHeader(http.StatusCreated)
+			json.NewEncoder(w).Encode(map[string]string{"message": "Message sent successfully"})
+		})
+		
+		// Add an endpoint to get room messages
+		r.Get("/rooms/{code}/messages", func(w http.ResponseWriter, r *http.Request) {
+			roomCode := chi.URLParam(r, "code")
+			if roomCode == "" {
+				http.Error(w, "Room code is required", http.StatusBadRequest)
+				return
+			}
+
+			room, err := chatService.GetRoomByCode(roomCode)
+			if err != nil {
+				http.Error(w, "Room not found", http.StatusNotFound)
+				return
+			}
+
+			messages, err := chatService.GetMessages(room.ID)
+			if err != nil {
+				http.Error(w, "Error retrieving messages: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
+
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(messages)
 		})
 	})
 
-	router.Mount("/api/v1", router)
 	return router
 }
