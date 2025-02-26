@@ -2,15 +2,17 @@ package services
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/c0sm0thecoder/cli-chat-app/internal/models"
 	"github.com/c0sm0thecoder/cli-chat-app/internal/repositories"
 	gonanoid "github.com/matoous/go-nanoid/v2"
+	"gorm.io/gorm"
 )
 
 type ChatService interface {
-	CreateRoom(roomName string) error
-	SendMessage(roomID, senderID, messageContent string) error
+	CreateRoom(roomName string) (*models.Room, error)
+	SendMessage(roomID, senderID, messageContent string) (*models.Message, error)
 	GetMessages(roomID string) ([]models.Message, error)
 	GetRoomByCode(roomCode string) (*models.Room, error)
 }
@@ -20,6 +22,13 @@ type chatService struct {
 	messageRepo repositories.MessageRepository
 }
 
+var (
+	ErrEmptyRoomName     = errors.New("room name cannot be empty")
+	ErrEmptyMessage      = errors.New("message content cannot be empty")
+	ErrRoomNotFound      = errors.New("room not found")
+	ErrInvalidSenderID   = errors.New("invalid sender ID")
+)
+
 func NewChatService(roomRepo repositories.RoomRepository, messageRepo repositories.MessageRepository) ChatService {
 	return &chatService{
 		roomRepo:    roomRepo,
@@ -27,34 +36,66 @@ func NewChatService(roomRepo repositories.RoomRepository, messageRepo repositori
 	}
 }
 
-func (s *chatService) CreateRoom(roomName string) error {
+func (s *chatService) CreateRoom(roomName string) (*models.Room, error) {
+	if roomName == "" {
+		return nil, ErrEmptyRoomName
+	}
+	
+	// Generate a unique room code
 	roomCode, err := gonanoid.New(12)
 	if err != nil {
-		return err
+		return nil, fmt.Errorf("failed to generate room code: %w", err)
 	}
+	
 	room := &models.Room{
 		Name: roomName,
 		Code: roomCode,
 	}
-	return s.roomRepo.Create(room)
+	
+	if err := s.roomRepo.Create(room); err != nil {
+		return nil, err
+	}
+	
+	return room, nil
 }
 
-func (s *chatService) SendMessage(roomID, senderID, messageContent string) error {
+func (s *chatService) SendMessage(roomID, senderID, messageContent string) (*models.Message, error) {
 	if messageContent == "" {
-		return errors.New("message body can't be empty")
+		return nil, ErrEmptyMessage
 	}
+	
+	if senderID == "" {
+		return nil, ErrInvalidSenderID
+	}
+	
 	message := &models.Message{
 		RoomID:   roomID,
 		SenderID: senderID,
 		Content:  messageContent,
 	}
-	return s.messageRepo.Create(message)
+	
+	if err := s.messageRepo.Create(message); err != nil {
+		return nil, err
+	}
+	
+	return message, nil
 }
 
 func (s *chatService) GetMessages(roomID string) ([]models.Message, error) {
-	return s.messageRepo.FindByRoom(roomID)
+	messages, err := s.messageRepo.FindByRoom(roomID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve messages: %w", err)
+	}
+	return messages, nil
 }
 
 func (s *chatService) GetRoomByCode(roomCode string) (*models.Room, error) {
-	return s.roomRepo.FindByCode(roomCode)
+	room, err := s.roomRepo.FindByCode(roomCode)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrRoomNotFound
+		}
+		return nil, err
+	}
+	return room, nil
 }
