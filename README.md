@@ -121,12 +121,6 @@ The application follows a clean architecture pattern:
 
 ## Development
 
-### Running Tests
-
-```bash
-go test ./...
-```
-
 ### Building for Different Platforms
 
 Build for Linux:
