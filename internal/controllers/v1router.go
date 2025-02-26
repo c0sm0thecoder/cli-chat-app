@@ -87,6 +87,7 @@ func NewV1Router(authService services.AuthService, chatService services.ChatServ
 	router.Group(func(r chi.Router) {
 		r.Use(middlewares.JWTMiddleware(os.Getenv("JWT_SECRET")))
 
+		// Update the room creation handler to match the new service interface
 		r.Post("/rooms", func(w http.ResponseWriter, r *http.Request) {
 			var req struct {
 				Name string `json:"name"`
@@ -101,13 +102,23 @@ func NewV1Router(authService services.AuthService, chatService services.ChatServ
 				return
 			}
 			
-			if err := chatService.CreateRoom(req.Name); err != nil {
-				http.Error(w, "Error creating room: "+err.Error(), http.StatusInternalServerError)
+			room, err := chatService.CreateRoom(req.Name)
+			if err != nil {
+				switch err {
+				case services.ErrEmptyRoomName:
+					http.Error(w, "Room name cannot be empty", http.StatusBadRequest)
+				default:
+					http.Error(w, "Error creating room: "+err.Error(), http.StatusInternalServerError)
+				}
 				return
 			}
 			
 			w.WriteHeader(http.StatusCreated)
-			json.NewEncoder(w).Encode(map[string]string{"message": "Room created successfully"})
+			json.NewEncoder(w).Encode(map[string]string{
+				"id": room.ID,
+				"name": room.Name,
+				"code": room.Code,
+			})
 		})
 
 		r.Post("/rooms/{code}/messages", func(w http.ResponseWriter, r *http.Request) {
