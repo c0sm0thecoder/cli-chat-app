@@ -1,6 +1,9 @@
 package repositories
 
 import (
+	"errors"
+	"fmt"
+
 	"github.com/c0sm0thecoder/cli-chat-app/internal/models"
 	"gorm.io/gorm"
 )
@@ -19,11 +22,16 @@ func NewMessageRepository(db *gorm.DB) MessageRepository {
 }
 
 func (r *messageRepo) Create(message *models.Message) error {
-	return r.db.Create(message).Error
+	if err := r.db.Create(message).Error; err != nil {
+		return fmt.Errorf("failed to create message: %w", err)
+	}
+	return nil
 }
 
 func (r *messageRepo) FindByRoom(roomID string) ([]models.Message, error) {
 	var messages []models.Message
-	err := r.db.Where("roomID = ?", roomID).Find(&messages).Error
-	return messages, err
+	if err := r.db.Where("room_id = ?", roomID).Order("created_at asc").Find(&messages).Error; err != nil {
+		return nil, fmt.Errorf("failed to find messages for room: %w", err)
+	}
+	return messages, nil
 }

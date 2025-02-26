@@ -1,6 +1,9 @@
 package repositories
 
 import (
+	"errors"
+	"fmt"
+
 	"github.com/c0sm0thecoder/cli-chat-app/internal/models"
 	"gorm.io/gorm"
 )
@@ -19,11 +22,19 @@ func NewUserRepository(db *gorm.DB) UserRepository {
 }
 
 func (r *userRepo) Create(user *models.User) error {
-	return r.db.Create(user).Error
+	if err := r.db.Create(user).Error; err != nil {
+		return fmt.Errorf("failed to create user: %w", err)
+	}
+	return nil
 }
 
 func (r *userRepo) FindByUsername(username string) (*models.User, error) {
 	var user models.User
-	err := r.db.Where("username = ?", username).First(&user).Error
-	return &user, err
+	if err := r.db.Where("user_name = ?", username).First(&user).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, err
+		}
+		return nil, fmt.Errorf("failed to find user by username: %w", err)
+	}
+	return &user, nil
 }
