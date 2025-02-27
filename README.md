@@ -115,7 +115,7 @@ The application follows a clean architecture pattern:
 - **Go**: Main programming language
 - **tview**: Terminal UI library
 - **chi**: HTTP router
-- **GORM**: ORM library for SQLite
+- **GORM**: ORM library for PostgreSQL
 - **JWT**: Authentication tokens
 - **WebSockets**: Real-time communication
 
